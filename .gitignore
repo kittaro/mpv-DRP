@@ -3,3 +3,4 @@ mpv-local/
 
 # cache files
 script-opts/imdb_cache.json
+\!id.txt

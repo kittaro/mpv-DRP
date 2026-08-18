@@ -23,7 +23,7 @@ local o = {
     activity_type_audio = 2,
     large_image_default = "mpv",
     large_image_audio = "music_note",
-    small_image_play = "play",
+    small_image_play = "",
     small_image_pause = "pause",
     use_c_dll_bridge = false,
     dll_path = ""
@@ -551,7 +551,6 @@ local function update_discord_presence_payload()
     local start_timestamp = math.floor(now - time_pos)
     local end_timestamp = (duration > 0) and math.floor(start_timestamp + duration) or nil
 
-    -- Static formatted progress without trailing (pause) label
     local pause_time_str = ""
     if paused and time_pos > 0 then
         if duration > 0 then
@@ -566,8 +565,16 @@ local function update_discord_presence_payload()
     local state_str = ""
     local large_image = o.large_image_default
     local large_text = "mpv media player"
-    local small_image = paused and o.small_image_pause or o.small_image_play
-    local small_text = paused and (o.language == "ru" and "пауза" or "paused") or (o.language == "ru" and "воспроизведение" or "playing")
+
+    -- Show small icon ONLY on pause (omit during playback)
+    local small_image = nil
+    local small_text = nil
+    if paused then
+        if o.small_image_pause and o.small_image_pause ~= "" then
+            small_image = o.small_image_pause
+        end
+        small_text = (o.language == "ru" and "пауза" or "paused")
+    end
     
     local act_type = is_audio and o.activity_type_audio or o.activity_type_video
 
@@ -606,15 +613,11 @@ local function update_discord_presence_payload()
         else
             large_image = o.large_image_audio
         end
-        
-        small_text = paused and (o.language == "ru" and "пауза" or "paused") or (o.language == "ru" and "слушает" or "listening")
     else
         local quality_badge = get_video_quality_badge()
         
         if active_imdb_data then
             name_str = active_imdb_data.title
-            
-            -- Line 1 (details / bold): Title (Year)
             details_str = active_imdb_data.title .. (active_imdb_data.year and (" (" .. active_imdb_data.year .. ")") or "")
             
             if active_imdb_data.poster_url and o.fetch_cover_art then
@@ -628,7 +631,6 @@ local function update_discord_presence_payload()
             large_text = info.clean_title
         end
 
-        -- Line 2 (state): Season/Episode + Playlist pos + Quality badge + Static time on pause
         local ep_parts = {}
         if info.season and info.episode then
             table.insert(ep_parts, string.format("S%02dE%02d", info.season, info.episode))
@@ -655,18 +657,22 @@ local function update_discord_presence_payload()
         end
     end
 
+    local assets_tbl = {
+        large_image = large_image,
+        large_text = large_text
+    }
+    if small_image then
+        assets_tbl.small_image = small_image
+        assets_tbl.small_text = small_text
+    end
+
     local pid = ffi.C.GetCurrentProcessId()
     local activity = {
         name = name_str,
         type = act_type,
         details = details_str,
         state = state_str,
-        assets = {
-            large_image = large_image,
-            large_text = large_text,
-            small_image = small_image,
-            small_text = small_text
-        }
+        assets = assets_tbl
     }
 
     if not paused then

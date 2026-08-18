@@ -193,6 +193,51 @@ local function format_time(seconds)
     end
 end
 
+-- video quality badge detector
+local function get_video_quality_badge()
+    local parts = {}
+    local w = mp.get_property_number("video-out-params/w") or mp.get_property_number("width")
+    local h = mp.get_property_number("video-out-params/h") or mp.get_property_number("height")
+    
+    if h and h > 0 then
+        local res = ""
+        if h >= 2160 or (w and w >= 3800) then
+            res = "4k"
+        elseif h >= 1400 or (w and w >= 2500) then
+            res = "1440p"
+        elseif h >= 1080 or (w and w >= 1900) then
+            res = "1080p"
+        elseif h >= 720 or (w and w >= 1200) then
+            res = "720p"
+        elseif h >= 480 then
+            res = "480p"
+        end
+
+        local color_transfer = mp.get_property("video-out-params/color-transfer") or ""
+        if color_transfer == "pq" or color_transfer == "hlg" then
+            res = res .. " hdr"
+        end
+
+        if res ~= "" then
+            table.insert(parts, res)
+        end
+    end
+
+    local channels = mp.get_property_number("audio-params/channel-count")
+    if channels and channels >= 6 then
+        if channels >= 8 then
+            table.insert(parts, "7.1")
+        else
+            table.insert(parts, "5.1")
+        end
+    end
+
+    if #parts > 0 then
+        return table.concat(parts, " ")
+    end
+    return nil
+end
+
 -- audio detector
 local function is_audio_file(path)
     if path then
@@ -506,12 +551,13 @@ local function update_discord_presence_payload()
     local start_timestamp = math.floor(now - time_pos)
     local end_timestamp = (duration > 0) and math.floor(start_timestamp + duration) or nil
 
+    -- Static formatted progress without trailing (pause) label
     local pause_time_str = ""
     if paused and time_pos > 0 then
         if duration > 0 then
-            pause_time_str = string.format("%s / %s (%s)", format_time(time_pos), format_time(duration), (o.language == "ru" and "пауза" or "paused"))
+            pause_time_str = string.format("%s / %s", format_time(time_pos), format_time(duration))
         else
-            pause_time_str = string.format("%s (%s)", format_time(time_pos), (o.language == "ru" and "пауза" or "paused"))
+            pause_time_str = format_time(time_pos)
         end
     end
 
@@ -563,19 +609,26 @@ local function update_discord_presence_payload()
         
         small_text = paused and (o.language == "ru" and "пауза" or "paused") or (o.language == "ru" and "слушает" or "listening")
     else
+        local quality_badge = get_video_quality_badge()
+        
         if active_imdb_data then
             name_str = active_imdb_data.title
+            
+            -- Line 1 (details / bold): Title (Year)
             details_str = active_imdb_data.title .. (active_imdb_data.year and (" (" .. active_imdb_data.year .. ")") or "")
+            
             if active_imdb_data.poster_url and o.fetch_cover_art then
                 large_image = active_imdb_data.poster_url
             end
-            large_text = active_imdb_data.title
+            
+            large_text = active_imdb_data.title .. (active_imdb_data.stars and (" • " .. active_imdb_data.stars) or "")
         else
             name_str = info.clean_title
-            details_str = info.clean_title
+            details_str = info.clean_title .. (info.year and (" (" .. info.year .. ")") or "")
             large_text = info.clean_title
         end
 
+        -- Line 2 (state): Season/Episode + Playlist pos + Quality badge + Static time on pause
         local ep_parts = {}
         if info.season and info.episode then
             table.insert(ep_parts, string.format("S%02dE%02d", info.season, info.episode))
@@ -585,6 +638,10 @@ local function update_discord_presence_payload()
 
         if o.show_playlist_pos and playlist_count > 1 then
             table.insert(ep_parts, string.format("[%d/%d]", playlist_pos, playlist_count))
+        end
+
+        if quality_badge then
+            table.insert(ep_parts, quality_badge)
         end
 
         if paused and pause_time_str ~= "" then

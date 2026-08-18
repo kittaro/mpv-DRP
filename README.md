@@ -14,6 +14,7 @@ A lightweight, zero-dependency **Discord Rich Presence** integration for the **m
 - **zero dependencies:** uses native Windows named pipe IPC via LuaJIT FFI (no external DLLs or python background processes required)
 - **imdb soft search:** automatically cleans filenames, extracts title, year, season, and episode, and fetches poster art from IMDb
 - **itunes music integration:** fetches track artwork via the iTunes Search API
+- **dynamic quality badges:** automatically detects resolution (`4k`, `1080p`, `720p`), HDR color space (`hdr`), and surround audio (`5.1`, `7.1`)
 - **torrserver support:** parses streaming URLs and handles playlist titles automatically
 - **native discord timer & pause support:** uses native Discord timestamps during playback and displays static time position when paused
 

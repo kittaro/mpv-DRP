@@ -25,6 +25,7 @@ local o = {
     large_image_audio = "music_note",
     small_image_play = "",
     small_image_pause = "pause",
+    poster_crop_mode = "fit",
     transparent_poster_padding = true,
     use_c_dll_bridge = false,
     dll_path = ""
@@ -495,10 +496,14 @@ local function search_imdb_soft(info, callback)
                             local clean_hd_url = raw_img:gsub("%._V1_.-%.(%w+)$", "._V1_.%1")
                             local final_poster_url = clean_hd_url
 
-                            if o.transparent_poster_padding then
-                                final_poster_url = "https://wsrv.nl/?url=" .. url_encode(clean_hd_url) .. "&w=1024&h=1024&fit=contain&output=png"
-                            else
+                            local mode = (o.poster_crop_mode or ""):lower()
+                            if mode == "crop" or mode == "fill" or mode == "square" then
                                 final_poster_url = raw_img:gsub("%._V1_.-%.(%w+)$", "._V1_UY1024_CR0,0,1024,1024_.%1")
+                            elseif mode == "raw" or mode == "original" or mode == "none" then
+                                final_poster_url = clean_hd_url
+                            else
+                                -- default: fit / contain with transparent side padding
+                                final_poster_url = "https://wsrv.nl/?url=" .. url_encode(clean_hd_url) .. "&w=1024&h=1024&fit=contain&output=png"
                             end
 
                             local result = {

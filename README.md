@@ -17,6 +17,7 @@ A lightweight, zero-dependency **Discord Rich Presence** integration for the **m
 - **dynamic quality badges:** automatically detects resolution (`4k`, `1080p`, `720p`), HDR color space (`hdr`), and surround audio (`5.1`, `7.1`)
 - **torrserver support:** parses streaming URLs and handles playlist titles automatically
 - **native discord timer & pause support:** uses native Discord timestamps during playback and displays static time position when paused
+- **configurable poster framing:** switch between transparent padded fit, 1:1 square crop, or raw uncropped poster formats
 
 ---
 
@@ -43,6 +44,9 @@ fetch_cover_art=yes
 
 # enable imdb search for video
 enable_imdb=yes
+
+# poster framing mode: fit (transparent side padding), crop (1:1 square crop), raw (original uncropped)
+poster_crop_mode=fit
 
 # show playlist position e.g. [5/12]
 show_playlist_pos=yes

@@ -1,5 +1,5 @@
 -- mpv discord rich presence integration with imdb & itunes support
--- zero-dependency lua jit ffi win32 named pipe rpc client
+-- zero-dependency lua jit ffi win32 named pipe & posix unix socket rpc client
 
 local mp = require("mp")
 local utils = require("mp.utils")
@@ -33,56 +33,74 @@ local o = {
 
 options.read_options(o, "discord_rp")
 
--- win32 named pipe ffi definitions
-ffi.cdef[[
-    typedef void* HANDLE;
-    typedef unsigned long DWORD;
-    typedef int BOOL;
+-- os platform detection
+local is_windows = (ffi.os == "Windows")
+local is_mac = (ffi.os == "OSX")
+local is_linux = (ffi.os == "Linux")
 
-    HANDLE CreateFileA(
-        const char* lpFileName,
-        DWORD dwDesiredAccess,
-        DWORD dwShareMode,
-        void* lpSecurityAttributes,
-        DWORD dwCreationDisposition,
-        DWORD dwFlagsAndAttributes,
-        HANDLE hTemplateFile
-    );
+-- ffi c definitions for win32 named pipes and posix unix sockets
+if is_windows then
+    ffi.cdef[[
+        typedef void* HANDLE;
+        typedef unsigned long DWORD;
+        typedef int BOOL;
 
-    BOOL WriteFile(
-        HANDLE hFile,
-        const void* lpBuffer,
-        DWORD nNumberOfBytesToWrite,
-        DWORD* lpNumberOfBytesWritten,
-        void* lpOverlapped
-    );
+        HANDLE CreateFileA(
+            const char* lpFileName,
+            DWORD dwDesiredAccess,
+            DWORD dwShareMode,
+            void* lpSecurityAttributes,
+            DWORD dwCreationDisposition,
+            DWORD dwFlagsAndAttributes,
+            HANDLE hTemplateFile
+        );
 
-    BOOL ReadFile(
-        HANDLE hFile,
-        void* lpBuffer,
-        DWORD nBufferSize,
-        DWORD* lpNumberOfBytesRead,
-        void* lpOverlapped
-    );
+        BOOL WriteFile(
+            HANDLE hFile,
+            const void* lpBuffer,
+            DWORD nNumberOfBytesToWrite,
+            DWORD* lpNumberOfBytesWritten,
+            void* lpOverlapped
+        );
 
-    BOOL CloseHandle(HANDLE hObject);
+        BOOL ReadFile(
+            HANDLE hFile,
+            void* lpBuffer,
+            DWORD nBufferSize,
+            DWORD* lpNumberOfBytesRead,
+            void* lpOverlapped
+        );
 
-    BOOL PeekNamedPipe(
-        HANDLE hNamedPipe,
-        void* lpBuffer,
-        DWORD nBufferSize,
-        DWORD* lpBytesRead,
-        DWORD* lpTotalBytesAvail,
-        DWORD* lpBytesLeftThisMessage
-    );
+        BOOL CloseHandle(HANDLE hObject);
+        DWORD GetCurrentProcessId();
+    ]]
+else
+    ffi.cdef[[
+        int socket(int domain, int type, int protocol);
+        int connect(int sockfd, const void *addr, unsigned int addrlen);
+        long write(int fd, const void *buf, size_t count);
+        long read(int fd, void *buf, size_t count);
+        int close(int fd);
+        int getpid(void);
+        char *getenv(const char *name);
 
-    DWORD GetCurrentProcessId();
-]]
+        struct sockaddr_un_linux {
+            uint16_t sun_family;
+            char sun_path[108];
+        };
+
+        struct sockaddr_un_osx {
+            uint8_t sun_len;
+            uint8_t sun_family;
+            char sun_path[104];
+        };
+    ]]
+end
 
 local GENERIC_READ = 0x80000000
 local GENERIC_WRITE = 0x40000000
 local OPEN_EXISTING = 3
-local INVALID_HANDLE_VALUE = ffi.cast("HANDLE", ffi.cast("intptr_t", -1))
+local INVALID_HANDLE_VALUE = is_windows and ffi.cast("HANDLE", ffi.cast("intptr_t", -1)) or -1
 
 -- runtime state and cache
 local ipc_handle = nil
@@ -126,6 +144,15 @@ end
 
 load_disk_cache()
 
+-- process id helper
+local function get_process_id()
+    if is_windows then
+        return ffi.C.GetCurrentProcessId()
+    else
+        return ffi.C.getpid()
+    end
+end
+
 -- discord ipc framing
 local function pack_packet(opcode, payload)
     local len = #payload
@@ -140,39 +167,102 @@ end
 local function send_ipc_packet(opcode, payload)
     if not ipc_handle or ipc_handle == INVALID_HANDLE_VALUE then return false end
     local buf, size = pack_packet(opcode, payload)
-    local written = ffi.new("DWORD[1]")
-    local res = ffi.C.WriteFile(ipc_handle, buf, size, written, nil)
-    if res == 0 or written[0] ~= size then
-        is_connected = false
-        ffi.C.CloseHandle(ipc_handle)
-        ipc_handle = nil
-        return false
+    
+    if is_windows then
+        local written = ffi.new("DWORD[1]")
+        local res = ffi.C.WriteFile(ipc_handle, buf, size, written, nil)
+        if res == 0 or written[0] ~= size then
+            is_connected = false
+            ffi.C.CloseHandle(ipc_handle)
+            ipc_handle = nil
+            return false
+        end
+    else
+        local fd = ffi.cast("int", ffi.cast("intptr_t", ipc_handle))
+        local res = ffi.C.write(fd, buf, size)
+        if res ~= size then
+            is_connected = false
+            ffi.C.close(fd)
+            ipc_handle = nil
+            return false
+        end
     end
     return true
 end
 
 local function connect_discord_ipc()
-    if is_connected and ipc_handle then return true end
+    if is_connected and ipc_handle and ipc_handle ~= INVALID_HANDLE_VALUE then return true end
     
-    for i = 0, 9 do
-        local pipe_name = "\\\\.\\pipe\\discord-ipc-" .. i
-        local handle = ffi.C.CreateFileA(
-            pipe_name,
-            bit.bor(GENERIC_READ, GENERIC_WRITE),
-            0,
-            nil,
-            OPEN_EXISTING,
-            0,
-            nil
-        )
-        if handle ~= INVALID_HANDLE_VALUE then
-            ipc_handle = handle
-            is_connected = true
-            
-            local handshake_payload = string.format('{"v":1,"client_id":"%s"}', o.client_id)
-            if send_ipc_packet(0, handshake_payload) then
-                mp.msg.info("connected to discord ipc: " .. pipe_name)
-                return true
+    if is_windows then
+        for i = 0, 9 do
+            local pipe_name = "\\\\.\\pipe\\discord-ipc-" .. i
+            local handle = ffi.C.CreateFileA(
+                pipe_name,
+                bit.bor(GENERIC_READ, GENERIC_WRITE),
+                0,
+                nil,
+                OPEN_EXISTING,
+                0,
+                nil
+            )
+            if handle ~= INVALID_HANDLE_VALUE then
+                ipc_handle = handle
+                is_connected = true
+                
+                local handshake_payload = string.format('{"v":1,"client_id":"%s"}', o.client_id)
+                if send_ipc_packet(0, handshake_payload) then
+                    mp.msg.info("connected to discord ipc: " .. pipe_name)
+                    return true
+                end
+            end
+        end
+    else
+        local base_dirs = {}
+        local xdg = ffi.C.getenv("XDG_RUNTIME_DIR")
+        if xdg and #ffi.string(xdg) > 0 then table.insert(base_dirs, ffi.string(xdg)) end
+        
+        local tmpdir = ffi.C.getenv("TMPDIR")
+        if tmpdir and #ffi.string(tmpdir) > 0 then table.insert(base_dirs, ffi.string(tmpdir)) end
+        
+        local tmp = ffi.C.getenv("TMP")
+        if tmp and #ffi.string(tmp) > 0 then table.insert(base_dirs, ffi.string(tmp)) end
+        
+        local temp = ffi.C.getenv("TEMP")
+        if temp and #ffi.string(temp) > 0 then table.insert(base_dirs, ffi.string(temp)) end
+        
+        table.insert(base_dirs, "/tmp")
+
+        for _, dir in ipairs(base_dirs) do
+            for i = 0, 9 do
+                local sock_path = dir:gsub("/+$", "") .. "/discord-ipc-" .. i
+                local fd = ffi.C.socket(1, 1, 0) -- AF_UNIX=1, SOCK_STREAM=1
+                if fd >= 0 then
+                    local connected = false
+                    if is_mac then
+                        local addr = ffi.new("struct sockaddr_un_osx")
+                        addr.sun_len = #sock_path + 2
+                        addr.sun_family = 1
+                        ffi.copy(addr.sun_path, sock_path, #sock_path)
+                        connected = (ffi.C.connect(fd, addr, ffi.sizeof(addr)) == 0)
+                    else
+                        local addr = ffi.new("struct sockaddr_un_linux")
+                        addr.sun_family = 1
+                        ffi.copy(addr.sun_path, sock_path, #sock_path)
+                        connected = (ffi.C.connect(fd, addr, ffi.sizeof(addr)) == 0)
+                    end
+
+                    if connected then
+                        ipc_handle = ffi.cast("HANDLE", ffi.cast("intptr_t", fd))
+                        is_connected = true
+                        
+                        local handshake_payload = string.format('{"v":1,"client_id":"%s"}', o.client_id)
+                        if send_ipc_packet(0, handshake_payload) then
+                            mp.msg.info("connected to discord ipc unix socket: " .. sock_path)
+                            return true
+                        end
+                    end
+                    ffi.C.close(fd)
+                end
             end
         end
     end
@@ -535,7 +625,7 @@ local function update_discord_presence_payload()
 
     local path = mp.get_property("path")
     if not path then
-        local pid = ffi.C.GetCurrentProcessId()
+        local pid = get_process_id()
         local idle_json = string.format([[{
             "cmd": "SET_ACTIVITY",
             "args": {
@@ -559,7 +649,7 @@ local function update_discord_presence_payload()
 
     local paused = mp.get_property_bool("pause", false)
     if paused and not o.active_when_paused then
-        send_ipc_packet(1, string.format('{"cmd":"SET_ACTIVITY","args":{"pid":%d},"nonce":"%d"}', ffi.C.GetCurrentProcessId(), os.time()))
+        send_ipc_packet(1, string.format('{"cmd":"SET_ACTIVITY","args":{"pid":%d},"nonce":"%d"}', get_process_id(), os.time()))
         return
     end
 
@@ -700,7 +790,7 @@ local function update_discord_presence_payload()
         assets_tbl.small_text = small_text
     end
 
-    local pid = ffi.C.GetCurrentProcessId()
+    local pid = get_process_id()
     local activity = {
         name = name_str,
         type = act_type,
@@ -833,9 +923,13 @@ timer = mp.add_periodic_timer(o.update_interval, update_discord_presence_payload
 
 mp.register_event("shutdown", function()
     if ipc_handle and ipc_handle ~= INVALID_HANDLE_VALUE then
-        ffi.C.CloseHandle(ipc_handle)
+        if is_windows then
+            ffi.C.CloseHandle(ipc_handle)
+        else
+            ffi.C.close(ffi.cast("int", ffi.cast("intptr_t", ipc_handle)))
+        end
         ipc_handle = nil
     end
 end)
 
-mp.msg.info("discord rich presence script loaded successfully")
+mp.msg.info("discord rich presence script loaded successfully (" .. ffi.os .. ")")

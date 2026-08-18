@@ -1,6 +1,6 @@
 # mpv discord rich presence
 
-A lightweight, zero-dependency **Discord Rich Presence** integration for the **mpv** media player on Windows.
+A lightweight, zero-dependency, cross-platform **Discord Rich Presence** integration for the **mpv** media player (Windows, Linux, and macOS).
 
 > **About this project**  
 > This mpv script serves a specific, key purpose for me: it extracts media information from the filename and looks up details on IMDb for display in Discord via Discord Rich Presence (most often, mpv is isolated and used separately to stream local torrents via the TorrServer integration script). Additionally, track/music integration was implemented via the iTunes API (medium quality library and cover art).  
@@ -11,7 +11,8 @@ A lightweight, zero-dependency **Discord Rich Presence** integration for the **m
 
 ## features
 
-- **zero dependencies:** uses native Windows named pipe IPC via LuaJIT FFI (no external DLLs or python background processes required)
+- **zero dependencies:** uses native Windows named pipe IPC and POSIX Unix domain sockets via LuaJIT FFI (no external DLLs, python background scripts, or node.js runtime required)
+- **cross-platform support:** runs seamlessly out of the box on **Windows**, **Linux**, and **macOS**
 - **imdb soft search:** automatically cleans filenames, extracts title, year, season, and episode, and fetches poster art from IMDb
 - **itunes music integration:** fetches track artwork via the iTunes Search API
 - **dynamic quality badges:** automatically detects resolution (`4k`, `1080p`, `720p`), HDR color space (`hdr`), and surround audio (`5.1`, `7.1`)

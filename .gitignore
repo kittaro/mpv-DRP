@@ -1,0 +1,5 @@
+# local mpv portable binaries
+mpv-local/
+
+# cache files
+script-opts/imdb_cache.json

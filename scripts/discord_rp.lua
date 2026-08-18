@@ -498,7 +498,7 @@ local function search_imdb_soft(info, callback)
 
                             local mode = (o.poster_crop_mode or ""):lower()
                             if mode == "crop" or mode == "fill" or mode == "square" then
-                                final_poster_url = raw_img:gsub("%._V1_.-%.(%w+)$", "._V1_UY1024_CR0,0,1024,1024_.%1")
+                                final_poster_url = "https://wsrv.nl/?url=" .. url_encode(clean_hd_url) .. "&w=1024&h=1024&fit=cover"
                             elseif mode == "raw" or mode == "original" or mode == "none" then
                                 final_poster_url = clean_hd_url
                             else

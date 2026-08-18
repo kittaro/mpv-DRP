@@ -411,7 +411,7 @@ local function search_music_cover_soft(artist, track_title, callback)
             if data and type(data.results) == "table" and #data.results > 0 then
                 local item = data.results[1]
                 if item.artworkUrl100 then
-                    local cover_url = item.artworkUrl100:gsub("100x100bb", "600x600bb")
+                    local cover_url = item.artworkUrl100:gsub("100x100bb", "1200x1200bb")
                     music_cover_cache[query] = cover_url
                     save_disk_cache()
                     callback(cover_url)
@@ -480,12 +480,15 @@ local function search_imdb_soft(info, callback)
                 if data and type(data.d) == "table" and #data.d > 0 then
                     for _, item in ipairs(data.d) do
                         if item.l and item.i and item.i.imageUrl then
+                            local raw_img = item.i.imageUrl
+                            local clean_hd_url = raw_img:gsub("%._V1_.-%.(%w+)$", "._V1_.%1")
+                            
                             local result = {
                                 id = item.id,
                                 title = item.l,
                                 year = item.y,
                                 type = item.q,
-                                poster_url = item.i.imageUrl,
+                                poster_url = clean_hd_url,
                                 stars = item.s
                             }
                             imdb_cache[cache_key] = result
@@ -566,7 +569,6 @@ local function update_discord_presence_payload()
     local large_image = o.large_image_default
     local large_text = "mpv media player"
 
-    -- Show small icon ONLY on pause (omit during playback)
     local small_image = nil
     local small_text = nil
     if paused then

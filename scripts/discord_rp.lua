@@ -25,6 +25,7 @@ local o = {
     large_image_audio = "music_note",
     small_image_play = "",
     small_image_pause = "pause",
+    transparent_poster_padding = true,
     use_c_dll_bridge = false,
     dll_path = ""
 }
@@ -58,7 +59,7 @@ ffi.cdef[[
     BOOL ReadFile(
         HANDLE hFile,
         void* lpBuffer,
-        DWORD nNumberOfBytesToRead,
+        DWORD nBufferSize,
         DWORD* lpNumberOfBytesRead,
         void* lpOverlapped
     );
@@ -411,7 +412,7 @@ local function search_music_cover_soft(artist, track_title, callback)
             if data and type(data.results) == "table" and #data.results > 0 then
                 local item = data.results[1]
                 if item.artworkUrl100 then
-                    local cover_url = item.artworkUrl100:gsub("100x100bb", "1200x1200bb")
+                    local cover_url = item.artworkUrl100:gsub("100x100bb", "1024x1024bb")
                     music_cover_cache[query] = cover_url
                     save_disk_cache()
                     callback(cover_url)
@@ -482,13 +483,20 @@ local function search_imdb_soft(info, callback)
                         if item.l and item.i and item.i.imageUrl then
                             local raw_img = item.i.imageUrl
                             local clean_hd_url = raw_img:gsub("%._V1_.-%.(%w+)$", "._V1_.%1")
-                            
+                            local final_poster_url = clean_hd_url
+
+                            if o.transparent_poster_padding then
+                                final_poster_url = "https://wsrv.nl/?url=" .. url_encode(clean_hd_url) .. "&w=1024&h=1024&fit=contain&output=png"
+                            else
+                                final_poster_url = raw_img:gsub("%._V1_.-%.(%w+)$", "._V1_UY1024_CR0,0,1024,1024_.%1")
+                            end
+
                             local result = {
                                 id = item.id,
                                 title = item.l,
                                 year = item.y,
                                 type = item.q,
-                                poster_url = clean_hd_url,
+                                poster_url = final_poster_url,
                                 stars = item.s
                             }
                             imdb_cache[cache_key] = result

@@ -181,6 +181,16 @@ local function connect_discord_ipc()
     return false
 end
 
+-- string truncation helper to enforce discord rpc 128-byte string limits
+local function truncate_str(s, max_len)
+    if not s or s == "" then return "" end
+    max_len = max_len or 128
+    if #s > max_len then
+        return s:sub(1, max_len - 3) .. "..."
+    end
+    return s
+end
+
 -- time formatter
 local function format_time(seconds)
     if not seconds or seconds <= 0 then return "00:00" end
@@ -667,6 +677,15 @@ local function update_discord_presence_payload()
         end
     end
 
+    -- truncate string fields to enforce discord rpc 128-byte limits
+    name_str = truncate_str(name_str, 128)
+    details_str = truncate_str(details_str, 128)
+    state_str = truncate_str(state_str, 128)
+    large_text = truncate_str(large_text, 128)
+    if small_text then
+        small_text = truncate_str(small_text, 128)
+    end
+
     local assets_tbl = {
         large_image = large_image,
         large_text = large_text
@@ -735,6 +754,22 @@ local function on_media_file_changed()
 
         local is_audio = is_audio_file(path)
         local info = clean_media_title(path, media_title)
+
+        -- check local cache before sending initial presence packet
+        if not is_audio and o.enable_imdb then
+            local cache_key = info.clean_title .. (info.year and ("_" .. info.year) or "")
+            if imdb_cache[cache_key] ~= nil and imdb_cache[cache_key] ~= false then
+                active_imdb_data = imdb_cache[cache_key]
+            end
+        elseif is_audio then
+            local track_title = mp.get_property("metadata/by-key/Title") or mp.get_property("metadata/by-key/title") or info.clean_title
+            local artist = mp.get_property("metadata/by-key/Artist") or mp.get_property("metadata/by-key/artist") or mp.get_property("metadata/by-key/Album_Artist")
+            local query = (artist and (artist .. " ") or "") .. (track_title or "")
+            query = query:gsub("^%s+", ""):gsub("%s+$", "")
+            if music_cover_cache[query] ~= nil and music_cover_cache[query] ~= false then
+                active_music_cover_url = music_cover_cache[query]
+            end
+        end
 
         update_discord_presence_payload()
 

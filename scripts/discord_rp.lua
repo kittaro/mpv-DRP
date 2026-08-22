@@ -1,5 +1,5 @@
 -- mpv discord rich presence integration with imdb & itunes support
--- zero-dependency lua jit ffi win32 named pipe & posix unix socket rpc client
+-- lua jit ffi win32 named pipe & posix unix socket rpc client
 
 local mp = require("mp")
 local utils = require("mp.utils")
@@ -39,9 +39,12 @@ local is_mac = (ffi.os == "OSX")
 local is_linux = (ffi.os == "Linux")
 
 -- ffi c definitions for win32 named pipes and posix unix sockets
+ffi.cdef[[
+    typedef void* HANDLE;
+]]
+
 if is_windows then
     ffi.cdef[[
-        typedef void* HANDLE;
         typedef unsigned long DWORD;
         typedef int BOOL;
 
@@ -78,6 +81,7 @@ else
     ffi.cdef[[
         int socket(int domain, int type, int protocol);
         int connect(int sockfd, const void *addr, unsigned int addrlen);
+        long send(int sockfd, const void *buf, size_t len, int flags);
         long write(int fd, const void *buf, size_t count);
         long read(int fd, void *buf, size_t count);
         int close(int fd);
@@ -100,7 +104,7 @@ end
 local GENERIC_READ = 0x80000000
 local GENERIC_WRITE = 0x40000000
 local OPEN_EXISTING = 3
-local INVALID_HANDLE_VALUE = is_windows and ffi.cast("HANDLE", ffi.cast("intptr_t", -1)) or -1
+local INVALID_HANDLE_VALUE = is_windows and ffi.cast("HANDLE", ffi.cast("intptr_t", -1)) or ffi.cast("HANDLE", ffi.cast("intptr_t", -1))
 
 -- runtime state and cache
 local ipc_handle = nil
@@ -179,7 +183,8 @@ local function send_ipc_packet(opcode, payload)
         end
     else
         local fd = ffi.cast("int", ffi.cast("intptr_t", ipc_handle))
-        local res = ffi.C.write(fd, buf, size)
+        local MSG_NOSIGNAL = is_linux and 0x4000 or (is_mac and 0x20000 or 0)
+        local res = ffi.C.send(fd, buf, size, MSG_NOSIGNAL)
         if res ~= size then
             is_connected = false
             ffi.C.close(fd)
